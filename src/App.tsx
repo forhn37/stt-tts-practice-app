@@ -194,8 +194,10 @@ function WaveLab() {
   const [recordedAudio, setRecordedAudio] = useState<AudioBuffer | null>(null);
   const [isPlayingDemo, setIsPlayingDemo] = useState(false);
   const [demoRecording, setDemoRecording] = useState(false);
+  const [demoError, setDemoError] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const demoAudioContextRef = useRef<AudioContext | null>(null);
 
   // Keep refs updated
   useEffect(() => {
@@ -374,28 +376,66 @@ function WaveLab() {
   // 데모 녹음 시작
   const startDemoRecording = async () => {
     try {
+      setDemoError(null);
+
+      // 마이크 권한 요청
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+
+      // 지원되는 MIME 타입 확인
+      const mimeTypes = ['audio/webm', 'audio/mp4', 'audio/ogg', 'audio/wav'];
+      let selectedMimeType = '';
+      for (const mimeType of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(mimeType)) {
+          selectedMimeType = mimeType;
+          break;
+        }
+      }
+
+      const mediaRecorder = selectedMimeType
+        ? new MediaRecorder(stream, { mimeType: selectedMimeType })
+        : new MediaRecorder(stream);
+
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
       mediaRecorder.ondataavailable = (event) => {
-        audioChunksRef.current.push(event.data);
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const arrayBuffer = await audioBlob.arrayBuffer();
-        const audioContext = new AudioContext();
-        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        setRecordedAudio(audioBuffer);
-        stream.getTracks().forEach(track => track.stop());
+        try {
+          const audioBlob = new Blob(audioChunksRef.current, { type: selectedMimeType || 'audio/webm' });
+          const arrayBuffer = await audioBlob.arrayBuffer();
+
+          // AudioContext 재사용 또는 생성
+          if (!demoAudioContextRef.current || demoAudioContextRef.current.state === 'closed') {
+            demoAudioContextRef.current = new AudioContext();
+          }
+
+          const audioBuffer = await demoAudioContextRef.current.decodeAudioData(arrayBuffer);
+          setRecordedAudio(audioBuffer);
+          stream.getTracks().forEach(track => track.stop());
+        } catch (decodeErr) {
+          console.error('오디오 디코딩 실패:', decodeErr);
+          setDemoError('녹음된 오디오를 처리하는데 실패했습니다. 다시 시도해주세요.');
+        }
       };
 
-      mediaRecorder.start();
+      mediaRecorder.start(100); // 100ms마다 데이터 수집
       setDemoRecording(true);
     } catch (err) {
       console.error('녹음 시작 실패:', err);
+      if (err instanceof Error) {
+        if (err.name === 'NotAllowedError') {
+          setDemoError('마이크 권한이 거부되었습니다. 브라우저 설정에서 마이크 권한을 허용해주세요.');
+        } else if (err.name === 'NotFoundError') {
+          setDemoError('마이크가 발견되지 않았습니다. 마이크를 연결해주세요.');
+        } else {
+          setDemoError(`녹음 시작 실패: ${err.message}`);
+        }
+      }
     }
   };
 
@@ -411,38 +451,60 @@ function WaveLab() {
   const playDownsampled = async (targetSampleRate: number) => {
     if (!recordedAudio || isPlayingDemo) return;
     setIsPlayingDemo(true);
+    setDemoError(null);
 
     try {
       const originalSampleRate = recordedAudio.sampleRate;
       const originalData = recordedAudio.getChannelData(0);
 
+      // AudioContext 재사용 또는 생성
+      if (!demoAudioContextRef.current || demoAudioContextRef.current.state === 'closed') {
+        demoAudioContextRef.current = new AudioContext();
+      }
+
+      // suspended 상태면 resume
+      if (demoAudioContextRef.current.state === 'suspended') {
+        await demoAudioContextRef.current.resume();
+      }
+
+      const audioContext = demoAudioContextRef.current;
+
       // 다운샘플링 비율 계산
       const ratio = originalSampleRate / targetSampleRate;
       const newLength = Math.floor(originalData.length / ratio);
 
-      // 새 AudioContext 생성 (원래 샘플레이트로)
-      const audioContext = new AudioContext();
-      const newBuffer = audioContext.createBuffer(1, newLength, originalSampleRate);
-      const newData = newBuffer.getChannelData(0);
+      // 다운샘플링 (안티앨리어싱을 위한 간단한 로우패스 필터 적용)
+      const downsampled = new Float32Array(newLength);
 
-      // 간단한 다운샘플링 (평균값 사용)
       for (let i = 0; i < newLength; i++) {
-        const startIdx = Math.floor(i * ratio);
-        const endIdx = Math.min(Math.floor((i + 1) * ratio), originalData.length);
+        const centerIdx = i * ratio;
+        const startIdx = Math.max(0, Math.floor(centerIdx - ratio / 2));
+        const endIdx = Math.min(originalData.length, Math.ceil(centerIdx + ratio / 2));
+
+        // 가중 평균 (삼각 윈도우)
         let sum = 0;
+        let weightSum = 0;
         for (let j = startIdx; j < endIdx; j++) {
-          sum += originalData[j];
+          const weight = 1 - Math.abs(j - centerIdx) / ratio;
+          sum += originalData[j] * weight;
+          weightSum += weight;
         }
-        newData[i] = sum / (endIdx - startIdx);
+        downsampled[i] = weightSum > 0 ? sum / weightSum : 0;
       }
 
-      // 업샘플링 (다시 원래 길이로 - 품질 저하 시뮬레이션)
+      // 업샘플링 (선형 보간으로 품질 저하 시뮬레이션)
       const playBuffer = audioContext.createBuffer(1, originalData.length, originalSampleRate);
       const playData = playBuffer.getChannelData(0);
 
       for (let i = 0; i < originalData.length; i++) {
-        const srcIdx = Math.floor(i / ratio);
-        playData[i] = newData[Math.min(srcIdx, newLength - 1)];
+        const srcIdxFloat = i / ratio;
+        const srcIdx = Math.floor(srcIdxFloat);
+        const frac = srcIdxFloat - srcIdx;
+
+        // 선형 보간
+        const sample1 = downsampled[Math.min(srcIdx, newLength - 1)];
+        const sample2 = downsampled[Math.min(srcIdx + 1, newLength - 1)];
+        playData[i] = sample1 * (1 - frac) + sample2 * frac;
       }
 
       // 재생
@@ -451,11 +513,11 @@ function WaveLab() {
       source.connect(audioContext.destination);
       source.onended = () => {
         setIsPlayingDemo(false);
-        audioContext.close();
       };
       source.start();
     } catch (err) {
       console.error('재생 실패:', err);
+      setDemoError('오디오 재생에 실패했습니다. 다시 시도해주세요.');
       setIsPlayingDemo(false);
     }
   };
@@ -606,6 +668,13 @@ function WaveLab() {
             녹음 후 각 샘플링 레이트로 다운샘플링된 품질을 직접 비교해보세요.
           </p>
 
+          {demoError && (
+            <div className="mb-3 p-2 bg-red-900/50 border border-red-700 rounded text-xs text-red-300 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <span>{demoError}</span>
+            </div>
+          )}
+
           <div className="flex gap-2 mb-3">
             {!demoRecording ? (
               <button
@@ -614,7 +683,7 @@ function WaveLab() {
                 className="flex-1 bg-primary hover:bg-primary/80 text-white py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
               >
                 <Mic className="w-4 h-4" />
-                {recordedAudio ? '다시 녹음' : '녹음하기'}
+                {recordedAudio ? '다시 녹음' : '녹음하기 (2-3초)'}
               </button>
             ) : (
               <button
@@ -3300,17 +3369,6 @@ function AdvancedLab() {
   const authMediaRecorderRef = useRef<MediaRecorder | null>(null);
   const authAudioChunksRef = useRef<Blob[]>([]);
 
-  // Edge vs Cloud 상태
-  const [processingMode, setProcessingMode] = useState<'edge' | 'cloud'>('edge');
-  const [latencyDemo, setLatencyDemo] = useState<{
-    edge: number;
-    cloud: number;
-    edgeResult?: string;
-    cloudResult?: string;
-    dataSize?: number;
-  } | null>(null);
-  const [edgeCloudTesting, setEdgeCloudTesting] = useState(false);
-
   // SER 녹음 시작
   const startSerRecording = async () => {
     try {
@@ -3567,85 +3625,6 @@ function AdvancedLab() {
     }
   };
 
-  // Edge vs Cloud 데모 - 실제 Web Speech API로 측정
-  const runLatencyDemo = async () => {
-    if (edgeCloudTesting) return;
-    setEdgeCloudTesting(true);
-    setLatencyDemo(null);
-
-    try {
-      // Edge 처리 시간 측정 (Web Speech API = 브라우저 내장 = Edge)
-      const edgeStartTime = performance.now();
-
-      // Web Speech API로 음성 인식 시작 (짧은 테스트)
-      const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-      recognition.lang = 'ko-KR';
-      recognition.continuous = false;
-      recognition.interimResults = true;
-
-      let edgeResult = '';
-      let edgeFirstResultTime = 0;
-
-      const edgePromise = new Promise<{ latency: number; result: string }>((resolve) => {
-        recognition.onresult = (event) => {
-          const transcript = event.results[0][0].transcript;
-          if (edgeFirstResultTime === 0) {
-            edgeFirstResultTime = performance.now();
-          }
-          edgeResult = transcript;
-        };
-
-        recognition.onend = () => {
-          const edgeLatency = edgeFirstResultTime > 0 ? edgeFirstResultTime - edgeStartTime : 50;
-          resolve({ latency: edgeLatency, result: edgeResult || '(인식된 음성 없음)' });
-        };
-
-        recognition.onerror = () => {
-          resolve({ latency: 50, result: '(오류 발생)' });
-        };
-
-        // 3초 후 자동 종료
-        setTimeout(() => {
-          recognition.stop();
-        }, 3000);
-      });
-
-      recognition.start();
-
-      const edgeData = await edgePromise;
-
-      // Cloud 시뮬레이션 (네트워크 왕복 시간 추가)
-      // 실제 Cloud STT는 네트워크 전송 + 서버 처리 + 응답 시간이 추가됨
-      const networkLatency = 80 + Math.random() * 120; // 네트워크 왕복: 80-200ms
-      const serverProcessing = 50 + Math.random() * 100; // 서버 처리: 50-150ms
-      const cloudLatency = edgeData.latency + networkLatency + serverProcessing;
-
-      // 데이터 크기 계산 (3초 오디오, 16kHz, 16bit mono)
-      const audioDataSize = 3 * 16000 * 2; // ~96KB
-
-      setLatencyDemo({
-        edge: edgeData.latency,
-        cloud: cloudLatency,
-        edgeResult: edgeData.result,
-        cloudResult: edgeData.result, // 같은 결과로 가정
-        dataSize: audioDataSize,
-      });
-    } catch {
-      // Web Speech API 미지원 시 시뮬레이션
-      const edgeLatency = 30 + Math.random() * 40;
-      const cloudLatency = 150 + Math.random() * 200;
-      setLatencyDemo({
-        edge: edgeLatency,
-        cloud: cloudLatency,
-        edgeResult: '(브라우저 미지원)',
-        cloudResult: '(브라우저 미지원)',
-        dataSize: 96000,
-      });
-    } finally {
-      setEdgeCloudTesting(false);
-    }
-  };
-
   return (
     <div className="space-y-6">
       <h2 className="text-xl font-semibold flex items-center gap-2">
@@ -3654,7 +3633,7 @@ function AdvancedLab() {
       </h2>
 
       <p className="text-gray-400 text-sm">
-        음성 AI의 최신 응용 분야를 체험합니다: 감정 인식, 화자 분리, 음성 인증, Edge AI
+        음성 AI의 최신 응용 분야를 체험합니다: 감정 인식, 화자 분리, 음성 인증
       </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -4011,144 +3990,6 @@ function AdvancedLab() {
           </div>
         </div>
 
-        {/* Edge vs Cloud */}
-        <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-          <h3 className="font-medium mb-4 flex items-center gap-2">
-            ⚡ Edge vs Cloud 비교
-          </h3>
-          <p className="text-sm text-gray-400 mb-4">
-            음성 처리를 어디서 할지에 따라 지연 시간과 개인정보 보호가 달라집니다.
-          </p>
-
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <button
-              onClick={() => setProcessingMode('edge')}
-              data-testid="mode-edge"
-              className={`p-4 rounded-lg text-left transition-all ${
-                processingMode === 'edge' ? 'bg-primary/20 border-2 border-primary' : 'bg-gray-900 border border-gray-700'
-              }`}
-            >
-              <div className="font-medium mb-1">📱 Edge (온디바이스)</div>
-              <div className="text-xs text-gray-400">기기에서 직접 처리</div>
-            </button>
-            <button
-              onClick={() => setProcessingMode('cloud')}
-              data-testid="mode-cloud"
-              className={`p-4 rounded-lg text-left transition-all ${
-                processingMode === 'cloud' ? 'bg-secondary/20 border-2 border-secondary' : 'bg-gray-900 border border-gray-700'
-              }`}
-            >
-              <div className="font-medium mb-1">☁️ Cloud (서버)</div>
-              <div className="text-xs text-gray-400">서버에서 처리</div>
-            </button>
-          </div>
-
-          <button
-            onClick={runLatencyDemo}
-            disabled={edgeCloudTesting}
-            data-testid="latency-test-btn"
-            className={`w-full py-2 px-4 rounded-lg transition-colors mb-4 flex items-center justify-center gap-2 ${
-              edgeCloudTesting
-                ? 'bg-red-600 text-white animate-pulse cursor-not-allowed'
-                : 'bg-gray-700 hover:bg-gray-600 text-white'
-            }`}
-          >
-            {edgeCloudTesting ? (
-              <>
-                <Mic className="w-4 h-4" />
-                🎤 음성 인식 중... (3초)
-              </>
-            ) : (
-              '🎯 실시간 지연 시간 테스트'
-            )}
-          </button>
-
-          {edgeCloudTesting && (
-            <div className="p-3 bg-blue-900/30 border border-blue-700/50 rounded-lg text-sm text-center mb-4">
-              💡 마이크에 아무 말이나 해보세요! 실제 STT 응답 시간을 측정합니다.
-            </div>
-          )}
-
-          {latencyDemo && (
-            <div className="space-y-3 p-4 bg-gray-900 rounded-lg" data-testid="latency-result">
-              {/* 인식 결과 */}
-              {latencyDemo.edgeResult && (
-                <div className="pb-3 border-b border-gray-700">
-                  <div className="text-xs text-gray-500 mb-1">인식된 텍스트:</div>
-                  <div className="text-sm text-white">{latencyDemo.edgeResult}</div>
-                </div>
-              )}
-
-              {/* 지연 시간 비교 */}
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-400 flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                    Edge (Web Speech API)
-                  </span>
-                  <span className="text-green-400 font-bold">{latencyDemo.edge.toFixed(0)}ms</span>
-                </div>
-                <div className="bg-gray-700 rounded-full h-2 overflow-hidden">
-                  <div
-                    className="bg-green-500 h-2 rounded-full transition-all"
-                    style={{ width: `${Math.min(100, (latencyDemo.edge / latencyDemo.cloud) * 100)}%` }}
-                  />
-                </div>
-
-                <div className="flex justify-between items-center mt-2">
-                  <span className="text-gray-400 flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-yellow-500"></span>
-                    Cloud (네트워크 포함)
-                  </span>
-                  <span className="text-yellow-400 font-bold">{latencyDemo.cloud.toFixed(0)}ms</span>
-                </div>
-                <div className="bg-gray-700 rounded-full h-2 overflow-hidden">
-                  <div className="bg-yellow-500 h-2 rounded-full" style={{ width: '100%' }} />
-                </div>
-              </div>
-
-              {/* 데이터 크기 */}
-              {latencyDemo.dataSize && (
-                <div className="pt-3 border-t border-gray-700 text-xs text-gray-500">
-                  <div className="flex justify-between">
-                    <span>전송 데이터:</span>
-                    <span>{(latencyDemo.dataSize / 1024).toFixed(0)} KB</span>
-                  </div>
-                  <div className="flex justify-between mt-1">
-                    <span>Edge 이점:</span>
-                    <span className="text-green-400 font-medium">
-                      {(latencyDemo.cloud / latencyDemo.edge).toFixed(1)}배 빠름
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {/* 분석 설명 */}
-              <div className="pt-3 border-t border-gray-700 text-[10px] text-gray-500">
-                📊 Edge: 브라우저 내장 STT 사용 | Cloud: 네트워크 왕복(~150ms) + 서버 처리 시뮬레이션
-              </div>
-            </div>
-          )}
-
-          <div className="mt-4 grid grid-cols-2 gap-4 text-xs">
-            <div className="p-3 bg-gray-900 rounded">
-              <div className="font-medium text-primary mb-2">Edge 장점</div>
-              <ul className="text-gray-400 space-y-1">
-                <li>• 빠른 응답 (20-50ms)</li>
-                <li>• 오프라인 작동</li>
-                <li>• 개인정보 보호</li>
-              </ul>
-            </div>
-            <div className="p-3 bg-gray-900 rounded">
-              <div className="font-medium text-secondary mb-2">Cloud 장점</div>
-              <ul className="text-gray-400 space-y-1">
-                <li>• 높은 정확도</li>
-                <li>• 대용량 모델</li>
-                <li>• 쉬운 업데이트</li>
-              </ul>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* 최신 기술 트렌드 */}

@@ -400,7 +400,6 @@ test.describe('SoundLab App', () => {
       await expect(page.getByText('음성 감정 인식 (SER)')).toBeVisible();
       await expect(page.getByText('화자 분리 (Diarization)')).toBeVisible();
       await expect(page.getByText('음성 인증 (Voice Authentication)')).toBeVisible();
-      await expect(page.getByText('Edge vs Cloud 비교')).toBeVisible();
     });
 
     test('should have SER record button', async ({ page }) => {
@@ -416,27 +415,6 @@ test.describe('SoundLab App', () => {
     test('should have voice authentication enroll button', async ({ page }) => {
       await expect(page.getByTestId('auth-enroll-btn')).toBeVisible();
       await expect(page.getByTestId('auth-enroll-btn')).toContainText('목소리 등록 시작');
-    });
-
-    test('should switch between Edge and Cloud modes', async ({ page }) => {
-      // Default is Edge
-      await expect(page.getByTestId('mode-edge')).toHaveClass(/border-primary/);
-
-      // Click Cloud
-      await page.getByTestId('mode-cloud').click();
-      await expect(page.getByTestId('mode-cloud')).toHaveClass(/border-secondary/);
-    });
-
-    test('should run latency test', async ({ page }) => {
-      // Click the latency test button
-      await page.getByTestId('latency-test-btn').click();
-      // Wait for either the testing state or the result
-      // The test will either show "음성 인식 중" message or complete quickly and show results
-      // Due to Web Speech API requirements, it may fallback to simulation mode
-      await expect(page.getByTestId('latency-result')).toBeVisible({ timeout: 10000 });
-      // Check for the new UI elements (Edge (Web Speech API) and Cloud (네트워크 포함))
-      await expect(page.getByText('Edge (Web Speech API)')).toBeVisible();
-      await expect(page.getByText('Cloud (네트워크 포함)')).toBeVisible();
     });
 
     test('should display 2024 AI trends', async ({ page }) => {
