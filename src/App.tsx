@@ -128,25 +128,28 @@ function App() {
       {/* Tab Navigation */}
       <nav className="bg-gray-800 border-b border-gray-700">
         <div className="max-w-6xl mx-auto px-4">
-          <div className="flex space-x-1">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                data-testid={`tab-${tab.id}`}
-                onClick={() => setActiveTab(tab.id)}
-                className={`
-                  flex items-center gap-2 px-4 py-3 text-sm font-medium
-                  transition-colors duration-200
-                  ${activeTab === tab.id
-                    ? 'text-primary border-b-2 border-primary bg-gray-700/50'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-700/30'
-                  }
-                `}
-              >
-                {tab.icon}
-                {tab.label}
-              </button>
-            ))}
+          <div className="flex overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
+            <div className="flex space-x-1 min-w-max md:min-w-0">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  data-testid={`tab-${tab.id}`}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`
+                    flex items-center gap-1 md:gap-2 px-3 md:px-4 py-3 text-xs md:text-sm font-medium
+                    transition-colors duration-200 whitespace-nowrap
+                    ${activeTab === tab.id
+                      ? 'text-primary border-b-2 border-primary bg-gray-700/50'
+                      : 'text-gray-400 hover:text-white hover:bg-gray-700/30'
+                    }
+                  `}
+                >
+                  {tab.icon}
+                  <span className="hidden sm:inline">{tab.label}</span>
+                  <span className="sm:hidden">{tab.label.replace(' Lab', '')}</span>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </nav>
@@ -1176,39 +1179,39 @@ function STTLab() {
           <span className="text-secondary"> Beam Search</span>는 여러 후보를 유지합니다.
         </p>
 
-        <div className="flex gap-4 mb-4">
+        <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-4">
           {/* 모드 선택 */}
           <div className="flex gap-2">
             <button
               onClick={() => { setSearchMode('greedy'); setCurrentStep(0); }}
               data-testid="search-greedy"
-              className={`px-4 py-2 rounded-lg transition-all ${
+              className={`flex-1 sm:flex-none px-3 sm:px-4 py-2 rounded-lg transition-all text-sm ${
                 searchMode === 'greedy' ? 'bg-primary text-white' : 'bg-gray-700 hover:bg-gray-600'
               }`}
             >
-              Greedy Search
+              Greedy
             </button>
             <button
               onClick={() => { setSearchMode('beam'); setCurrentStep(0); }}
               data-testid="search-beam"
-              className={`px-4 py-2 rounded-lg transition-all ${
+              className={`flex-1 sm:flex-none px-3 sm:px-4 py-2 rounded-lg transition-all text-sm ${
                 searchMode === 'beam' ? 'bg-secondary text-white' : 'bg-gray-700 hover:bg-gray-600'
               }`}
             >
-              Beam Search
+              Beam
             </button>
           </div>
 
           {/* Beam Width 선택 (Beam Search만) */}
           {searchMode === 'beam' && (
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-400">Beam Width:</span>
+              <span className="text-xs sm:text-sm text-gray-400">Width:</span>
               {[1, 2, 3, 5].map(w => (
                 <button
                   key={w}
                   onClick={() => setBeamWidth(w)}
                   data-testid={`beam-width-${w}`}
-                  className={`w-8 h-8 rounded ${
+                  className={`w-7 h-7 sm:w-8 sm:h-8 rounded text-sm ${
                     beamWidth === w ? 'bg-secondary text-white' : 'bg-gray-700 hover:bg-gray-600'
                   }`}
                 >
@@ -1245,8 +1248,8 @@ function STTLab() {
         </div>
 
         {/* 트리 시각화 */}
-        <div className="bg-gray-900 rounded-lg p-4 overflow-x-auto">
-          <div className="min-w-[600px]">
+        <div className="bg-gray-900 rounded-lg p-3 sm:p-4 overflow-x-auto">
+          <div className="min-w-[320px] sm:min-w-[500px]">
             {/* Step 0: 시작 */}
             <div className="flex justify-center mb-4">
               <div className="bg-gray-700 px-4 py-2 rounded-lg text-center">
@@ -1257,25 +1260,25 @@ function STTLab() {
 
             {/* Step 1: 첫 번째 토큰 */}
             {currentStep >= 0 && (
-              <div className="flex justify-center gap-4 mb-4">
+              <div className="flex justify-center gap-2 sm:gap-4 mb-4">
                 {BEAM_SEARCH_DEMO.children?.slice(0, searchMode === 'greedy' ? 1 : beamWidth).map((child, idx) => (
                   <div key={idx} className="text-center">
                     <div className="text-gray-600 text-xs mb-1">↓</div>
-                    <div className={`px-4 py-2 rounded-lg ${
+                    <div className={`px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg ${
                       idx === 0 ? 'bg-primary/30 border-2 border-primary' : 'bg-gray-700'
                     }`}>
-                      <div className="font-bold">{child.token}</div>
-                      <div className="text-xs text-green-400">{(child.prob * 100).toFixed(0)}%</div>
-                      <div className="text-xs text-gray-400">누적: {(child.cumProb * 100).toFixed(0)}%</div>
+                      <div className="font-bold text-sm sm:text-base">{child.token}</div>
+                      <div className="text-[10px] sm:text-xs text-green-400">{(child.prob * 100).toFixed(0)}%</div>
+                      <div className="text-[10px] sm:text-xs text-gray-400 hidden sm:block">누적: {(child.cumProb * 100).toFixed(0)}%</div>
                     </div>
                   </div>
                 ))}
                 {searchMode === 'greedy' && (
                   <div className="text-center opacity-30">
                     <div className="text-gray-600 text-xs mb-1">↓</div>
-                    <div className="px-4 py-2 rounded-lg bg-gray-800 border border-gray-600 border-dashed">
-                      <div className="text-gray-500">다른 후보들</div>
-                      <div className="text-xs text-gray-500">(무시됨)</div>
+                    <div className="px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-gray-800 border border-gray-600 border-dashed">
+                      <div className="text-gray-500 text-xs sm:text-sm">다른 후보들</div>
+                      <div className="text-[10px] sm:text-xs text-gray-500">(무시됨)</div>
                     </div>
                   </div>
                 )}
@@ -1284,18 +1287,18 @@ function STTLab() {
 
             {/* Step 2: 두 번째 토큰 */}
             {currentStep >= 1 && (
-              <div className="flex justify-center gap-8 mb-4">
+              <div className="flex justify-center gap-3 sm:gap-8 mb-4">
                 {BEAM_SEARCH_DEMO.children?.slice(0, searchMode === 'greedy' ? 1 : beamWidth).map((parent, pIdx) => (
-                  <div key={pIdx} className="flex gap-2">
+                  <div key={pIdx} className="flex gap-1 sm:gap-2">
                     {parent.children?.slice(0, searchMode === 'greedy' ? 1 : 2).map((child, cIdx) => (
                       <div key={cIdx} className="text-center">
                         <div className="text-gray-600 text-xs mb-1">↓</div>
-                        <div className={`px-3 py-2 rounded-lg text-sm ${
+                        <div className={`px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm ${
                           pIdx === 0 && cIdx === 0 ? 'bg-primary/30 border-2 border-primary' : 'bg-gray-700'
                         }`}>
                           <div className="font-bold">{parent.token}{child.token}</div>
-                          <div className="text-xs text-green-400">{(child.prob * 100).toFixed(0)}%</div>
-                          <div className="text-xs text-gray-400">누적: {(child.cumProb * 100).toFixed(0)}%</div>
+                          <div className="text-[10px] sm:text-xs text-green-400">{(child.prob * 100).toFixed(0)}%</div>
+                          <div className="text-[10px] sm:text-xs text-gray-400 hidden sm:block">누적: {(child.cumProb * 100).toFixed(0)}%</div>
                         </div>
                       </div>
                     ))}
@@ -1306,19 +1309,19 @@ function STTLab() {
 
             {/* Step 3: 세 번째 토큰 */}
             {currentStep >= 2 && (
-              <div className="flex justify-center gap-8">
+              <div className="flex justify-center gap-3 sm:gap-8">
                 {BEAM_SEARCH_DEMO.children?.slice(0, searchMode === 'greedy' ? 1 : beamWidth).map((parent, pIdx) => (
-                  <div key={pIdx} className="flex gap-2">
+                  <div key={pIdx} className="flex gap-1 sm:gap-2">
                     {parent.children?.slice(0, searchMode === 'greedy' ? 1 : 2).map((child, cIdx) => (
                       child.children?.slice(0, 1).map((grandChild, gIdx) => (
                         <div key={gIdx} className="text-center">
                           <div className="text-gray-600 text-xs mb-1">↓</div>
-                          <div className={`px-3 py-2 rounded-lg text-sm ${
+                          <div className={`px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm ${
                             pIdx === 0 && cIdx === 0 ? 'bg-green-600/30 border-2 border-green-500' : 'bg-gray-700'
                           }`}>
                             <div className="font-bold">{parent.token}{child.token}{grandChild.token}</div>
-                            <div className="text-xs text-green-400">{(grandChild.prob * 100).toFixed(0)}%</div>
-                            <div className="text-xs text-gray-400">누적: {(grandChild.cumProb * 100).toFixed(0)}%</div>
+                            <div className="text-[10px] sm:text-xs text-green-400">{(grandChild.prob * 100).toFixed(0)}%</div>
+                            <div className="text-[10px] sm:text-xs text-gray-400 hidden sm:block">누적: {(grandChild.cumProb * 100).toFixed(0)}%</div>
                           </div>
                         </div>
                       ))
@@ -2403,19 +2406,19 @@ function TTSLab() {
 
         {/* 파이프라인 시각화 */}
         <div className="relative">
-          {/* 진행 바 */}
-          <div className="absolute top-8 left-0 right-0 h-1 bg-gray-700 rounded">
+          {/* 진행 바 - 모바일에서는 세로로 */}
+          <div className="hidden sm:block absolute top-8 left-0 right-0 h-1 bg-gray-700 rounded">
             <div
               className="h-full bg-gradient-to-r from-primary via-secondary to-green-500 rounded transition-all duration-500"
               style={{ width: pipelineStep >= 0 ? `${Math.min(100, (pipelineStep + 1) * 20)}%` : '0%' }}
             />
           </div>
 
-          {/* 단계 노드들 */}
-          <div className="flex justify-between mb-8 relative z-10">
+          {/* 단계 노드들 - 모바일에서는 그리드, 데스크탑에서는 가로 */}
+          <div className="grid grid-cols-3 gap-3 sm:flex sm:justify-between mb-8 relative z-10">
             {[
               { id: 0, label: '원문', icon: '📝', color: 'gray' },
-              { id: 1, label: 'Text Norm', icon: '🔢', color: 'primary' },
+              { id: 1, label: 'Norm', icon: '🔢', color: 'primary' },
               { id: 2, label: 'G2P', icon: '🗣️', color: 'secondary' },
               { id: 3, label: 'Acoustic', icon: '📊', color: 'green' },
               { id: 4, label: 'Vocoder', icon: '🔊', color: 'yellow' },
@@ -2423,10 +2426,10 @@ function TTSLab() {
             ].map((stage) => (
               <div key={stage.id} className="flex flex-col items-center">
                 <div
-                  className={`w-12 h-12 rounded-full flex items-center justify-center text-xl transition-all duration-300 ${
+                  className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-lg sm:text-xl transition-all duration-300 ${
                     pipelineStep >= stage.id
                       ? pipelineStep === stage.id
-                        ? 'bg-white text-gray-900 scale-125 shadow-lg shadow-white/30'
+                        ? 'bg-white text-gray-900 scale-110 sm:scale-125 shadow-lg shadow-white/30'
                         : stage.color === 'primary' ? 'bg-primary text-white' :
                           stage.color === 'secondary' ? 'bg-secondary text-white' :
                           stage.color === 'green' ? 'bg-green-500 text-white' :
@@ -2442,7 +2445,7 @@ function TTSLab() {
                     stage.icon
                   )}
                 </div>
-                <span className={`text-xs mt-2 ${pipelineStep >= stage.id ? 'text-white' : 'text-gray-500'}`}>
+                <span className={`text-[10px] sm:text-xs mt-1 sm:mt-2 ${pipelineStep >= stage.id ? 'text-white' : 'text-gray-500'}`}>
                   {stage.label}
                 </span>
               </div>
